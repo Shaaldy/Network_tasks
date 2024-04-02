@@ -4,36 +4,35 @@ from scapy.sendrecv import sr1
 
 
 def tracert(target_ip):
-    as_info = []
     ttl = 1
     while True:
         packet = IP(dst=target_ip, ttl=ttl) / ICMP()
         reply = sr1(packet, verbose=0, timeout=1)
         if reply is None or reply.src == target_ip or ttl > 30:
             break
-
-        response = requests.get(f"https://stat.ripe.net/data/prefix-overview/data.json?resource={reply.src}")
+        ip_address = reply.src
+        response = requests.get(f"https://stat.ripe.net/data/prefix-overview/data.json?resource={ip_address}")
         data = response.json()
-        as_info.append((ttl, reply.src, get_asn(data), get_provider(data)))
+        asn = data["data"]["asns"][0]["asn"] if data["data"]["asns"] else "Unknown"
+        provider = data["data"]["asns"][0]["holder"] if data["data"]["asns"] else "Unknown"
+        country = get_country(reply.src)
+        yield ttl, ip_address, asn, provider, country
         ttl += 1
-    return as_info
 
 
-def get_asn(data):
-    asn = data["data"]["asns"][0]["asn"] if data["data"]["asns"] else "Unknown"
-    return asn
-
-
-def get_provider(data):
-    provider = data["data"]["asns"][0]["holder"] if data["data"]["asns"] else ''
-    return provider
+def get_country(ip_address):
+    response_country = requests.get(f"https://stat.ripe.net/data/rir/data.json?resource={ip_address}&lod=2")
+    data = response_country.json()
+    for rir in data.get("data", {}).get("rirs", []):
+        if isinstance(rir, dict) and rir.get("country"):
+            return rir["country"]
 
 
 if __name__ == "__main__":
-    target_ip = 'google.com'
-    as_table = tracert(target_ip)
+    target_ip = 'hltv.org' # сюда писать IP или доменное имя
+    as_generator = tracert(target_ip)
 
-    print("TTL  | IP Address       |   ASN   |     Provider")
+    print("TTL  | IP Address       |   ASN   |          Provider                | Country")
     print("-" * 83)
-    for ttl, ip, asn, provider in as_table:
-        print(f"{ttl:<4} | {ip:<16} | {asn:<7} | {provider}")
+    for ttl, ip, asn, provider, country in as_generator:
+        print(f"{ttl:<4} | {ip:<16} | {asn:<7} | {provider:<32} | {country}")
